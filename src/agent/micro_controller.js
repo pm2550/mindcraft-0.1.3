@@ -1151,6 +1151,23 @@ export class MicroController {
                 const isEscapeMode = mode === 'flee' || mode === 'hide';
                 let action;
 
+                // HIDE mode: dig shelter instead of running (escape planner flee doesn't save you)
+                // Reflex sets mode=hide when hp<=6. Bot needs to dig a hole, not run.
+                if (mode === 'hide' && !this._hideDigIssued) {
+                    this._hideDigIssued = true;
+                    const bridge = this.agent.bot?._bridge;
+                    if (bridge) {
+                        // Cancel baritone, stop moving, dig down
+                        bridge.sendCommand('baritone', { command: 'cancel' }).catch(() => {});
+                        bridge.sendCommand('rl_action', { forward: false, back: false, sprint: false, jump: false }).catch(() => {});
+                        bridge.sendCommand('digDown', { depth: 3 }).catch(() => {});
+                        console.log(`[MicroCtrl] HIDE: issuing digDown(3) at hp=${obs.hp}`);
+                    }
+                }
+                if (mode !== 'hide') {
+                    this._hideDigIssued = false; // reset for next hide episode
+                }
+
                 if (isEscapeMode) {
                     // Cancel ALL Baritone navigation during flee/fight/hide.
                     // Without this: baritone goto-1200 and escape planner BOTH set movement keys
