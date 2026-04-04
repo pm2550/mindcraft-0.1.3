@@ -1063,6 +1063,11 @@ export class MicroController {
                             this.agent.bot._baritoneActive = true;
                             console.log(`[MicroCtrl] Resumed baritone goal after flee: goto ${g.x} 80 ${g.z}`);
                         }
+                        // Don't clear savedGoal here — keep it for rapid flee→continue→flee cycles.
+                        // It gets cleared on death (episode reset) or when new baritone goal is set by LLM.
+                    }
+                    // Clear savedGoal once baritone is confirmed running with its own goal
+                    if (this._savedBaritoneGoal && obs.baritone?.pathing && obs.baritone?.goalDist > 0) {
                         this._savedBaritoneGoal = null;
                     }
                     const idleConstraints = { ...scheduler.constraints, _mode: mode };
@@ -1401,6 +1406,7 @@ export class MicroController {
         this._lastObsAt = 0;
         this._smoothedDyaw = 0;
         this._loggedFirstActive = false;
+        this._savedBaritoneGoal = null; // don't resume stale goal after death
         this.escapePlanner?.reset();
         this.policyClient?.resetHidden?.();
         console.log(`[MicroCtrl] episode reset (${reason})`);
