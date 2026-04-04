@@ -1188,8 +1188,10 @@ export class MicroController {
                             jump: !!plannerAction.jump,
                             sprint: !!plannerAction.sprint,
                             attack: !!plannerAction.attack,
-                            use: !!plannerAction.use,
-                            sneak: !!plannerAction.sneak,
+                            // Don't send use:false — it cancels Java auto-eat (interactItem).
+                            // Only send use:true when escape planner explicitly wants it (stuck phase 3).
+                            ...(plannerAction.use ? { use: true } : {}),
+                            ...(plannerAction.sneak ? { sneak: true } : {}),
                             dyaw: plannerAction.dyaw,
                             dpitch: plannerAction.dpitch || 0,
                         };
