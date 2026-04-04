@@ -1157,10 +1157,18 @@ export class MicroController {
                     this._hideDigIssued = true;
                     const bridge = this.agent.bot?._bridge;
                     if (bridge) {
-                        // Cancel baritone, stop moving, dig down
+                        // Cancel baritone, stop moving
                         bridge.sendCommand('baritone', { command: 'cancel' }).catch(() => {});
                         bridge.sendCommand('rl_action', { forward: false, back: false, sprint: false, jump: false }).catch(() => {});
-                        bridge.sendCommand('digDown', { depth: 3 }).catch(() => {});
+                        // Use !digDown command through the agent's command system
+                        // This is the same as LLM typing !digDown(3)
+                        import('./library/skills.js').then(skills => {
+                            skills.digDown(this.agent.bot, 3).then(() => {
+                                console.log(`[MicroCtrl] HIDE: digDown(3) completed`);
+                            }).catch(e => {
+                                console.log(`[MicroCtrl] HIDE: digDown(3) failed: ${e.message || e}`);
+                            });
+                        }).catch(() => {});
                         console.log(`[MicroCtrl] HIDE: issuing digDown(3) at hp=${obs.hp}`);
                     }
                 }
