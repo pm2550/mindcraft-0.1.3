@@ -24,7 +24,7 @@ const settings = {
     ],
 
     "load_memory": false, // load memory from previous session
-    "init_message": "!goal(\"ONLY DO THIS: !baritone(goto 1200 80 0). Nothing else. Do not mine. Do not craft. Do not explore. Just goto 1200 80 0. When baritone finishes or fails, run it again: !baritone(goto 1200 80 0). Keep repeating until you reach x=1200.\")", // sends to all on spawn
+    "init_message": "!goal(\"You are at x=1200 in a new biome! Survive: 1) Kill animals for food (cow, pig, sheep). 2) Find trees, get wood with !baritone(mine oak_log). 3) Craft wooden pickaxe and sword. 4) Mine stone, craft stone tools. 5) Mine iron. 6) Fight zombies at night with your sword. Stay in this area, do NOT go back to spawn.\")", // sends to all on spawn
     "only_chat_with": [], // 只听这些玩家的指令，其他人说话会被忽略。留空则响应所有人
     // ===== 空闲时默认任务 =====
     // 当机器人空闲超过 idle_timeout 秒后，自动开始执行对应的默认任务
