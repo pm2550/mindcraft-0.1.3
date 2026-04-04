@@ -311,12 +311,20 @@ export class Agent {
             respondFunc(username, message);
         });
 
-        // Set up auto-eat
+        // Set up auto-eat — enable Java-side auto-eat via bridge command
         this.bot.autoEat.options = {
             priority: 'foodPoints',
             startAt: 14,
             bannedFood: ["rotten_flesh", "spider_eye", "poisonous_potato", "pufferfish", "chicken"]
         };
+        // Enable Java-side auto-eat (food<10 triggers eat from inventory)
+        if (this.bot._bridge) {
+            this.bot._bridge.sendCommand('autoEat', { enabled: true }).catch(() => {});
+        }
+        // Enable armor manager — auto-equip picked up armor
+        if (this.bot._bridge) {
+            this.bot._bridge.sendCommand('autoArmor', { enabled: true }).catch(() => {});
+        }
 
         const warmupDelay = this.warmup_until ? Math.max(0, this.warmup_until - Date.now()) : 0;
 

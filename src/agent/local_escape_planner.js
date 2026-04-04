@@ -461,6 +461,17 @@ class PathExecutor {
             const idx1 = terrainIdx(fwdWx, fwdWz);
             if (idx1 >= 0 && idx1 < 2601 && terrain[idx1] === 1) wallAhead = true;
         }
+        // Jump when wall ahead (step-up 1-block ledges). Without jump, bot gets stuck
+        // at every terracotta step in badlands. MC auto-jump only works for players, not bots.
+        const terrain = obs?.terrain || [];
+        let wallAhead = false;
+        if ((forward || left || right) && terrain.length >= 2601) {
+            const yaw = obs?.yaw || 0;
+            const rad = yaw * Math.PI / 180;
+            const fwdWx = -Math.sin(rad), fwdWz = Math.cos(rad);
+            const idx1 = terrainIdx(fwdWx, fwdWz);
+            if (idx1 >= 0 && idx1 < 2601 && terrain[idx1] === 1) wallAhead = true;
+        }
         let jump = !!obs?.onGround && wallAhead;
 
         // Stuck detection: escalating unstuck strategy.
