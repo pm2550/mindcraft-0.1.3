@@ -66,8 +66,8 @@ function bootstrapFightActions(obs) {
             fb = 2;      // forward — facing mob enough to close distance
             sprint = 1;
         } else {
-            fb = 1;      // stop — turn toward mob first, don't run past
-            sprint = 0;
+            fb = 2;      // still walk forward (slowly) — stopping causes standoff
+            sprint = 0;  // at dist=16.4 zombie won't chase; bot must close the gap
         }
         lr = 1;      // no strafe during approach
         jump = 0;
