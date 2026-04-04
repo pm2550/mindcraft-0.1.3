@@ -321,10 +321,7 @@ export class Agent {
         if (this.bot._bridge) {
             this.bot._bridge.sendCommand('autoEat', { enabled: true }).catch(() => {});
         }
-        // Enable armor manager — auto-equip picked up armor
-        if (this.bot._bridge) {
-            this.bot._bridge.sendCommand('autoArmor', { enabled: true }).catch(() => {});
-        }
+        // TODO: auto-armor needs Java-side implementation (CommandHandler doesn't have autoArmor yet)
 
         const warmupDelay = this.warmup_until ? Math.max(0, this.warmup_until - Date.now()) : 0;
 
