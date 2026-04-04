@@ -1053,6 +1053,18 @@ export class MicroController {
                 if (mode !== 'flee' && mode !== 'fight' && mode !== 'hide') {
                     // Cancel any active Baritone flee when mode leaves flee
                     if (this._baritoneFleeActive) this._cancelBaritoneFlee();
+                    // Resume saved baritone goal after flee ends — eliminates 5-10s freeze
+                    // waiting for LLM to re-issue goto command
+                    if (this._savedBaritoneGoal && !this.agent.bot?._baritoneActive) {
+                        const g = this._savedBaritoneGoal;
+                        const bridge = this.agent.bot?._bridge;
+                        if (bridge) {
+                            bridge.sendCommand('baritone', { command: `goto ${g.x} 80 ${g.z}` }).catch(() => {});
+                            this.agent.bot._baritoneActive = true;
+                            console.log(`[MicroCtrl] Resumed baritone goal after flee: goto ${g.x} 80 ${g.z}`);
+                        }
+                        this._savedBaritoneGoal = null;
+                    }
                     const idleConstraints = { ...scheduler.constraints, _mode: mode };
                     this._collectImitation(obs, idleConstraints);
                     // Send obs to policy server so value head + action heads learn navigation
@@ -1140,6 +1152,14 @@ export class MicroController {
                     // every tick → bot spins in place instead of fleeing.
                     if (this._baritoneFleeActive) this._cancelBaritoneFlee();
                     if (this.agent.bot?._baritoneActive) {
+                        // Save the last baritone goal so we can resume after flee
+                        if (!this._savedBaritoneGoal && obs.baritone?.goalDx !== undefined) {
+                            const px = obs.px || 0, pz = obs.pz || 0;
+                            this._savedBaritoneGoal = {
+                                x: Math.round(px + (obs.baritone.goalDx || 0)),
+                                z: Math.round(pz + (obs.baritone.goalDz || 0)),
+                            };
+                        }
                         const bridge = this.agent.bot?._bridge;
                         if (bridge) {
                             bridge.sendCommand('baritone', { command: 'cancel' }).catch(() => {});
