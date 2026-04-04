@@ -1135,8 +1135,17 @@ export class MicroController {
                 let action;
 
                 if (isEscapeMode) {
-                    // Cancel any lingering Baritone navigation during flee/fight
+                    // Cancel ALL Baritone navigation during flee/fight/hide.
+                    // Without this: baritone goto-1200 and escape planner BOTH set movement keys
+                    // every tick → bot spins in place instead of fleeing.
                     if (this._baritoneFleeActive) this._cancelBaritoneFlee();
+                    if (this.agent.bot?._baritoneActive) {
+                        const bridge = this.agent.bot?._bridge;
+                        if (bridge) {
+                            bridge.sendCommand('baritone', { command: 'cancel' }).catch(() => {});
+                            this.agent.bot._baritoneActive = false;
+                        }
+                    }
 
                     // Track outcome of policy explore — multi-indicator composite scoring
                     this._lifetimeTicks++; // count ticks alive for long-term indicator
