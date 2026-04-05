@@ -789,7 +789,7 @@ function tacticalDecide(state) {
         }
         // lethal: hide (dig shelter) when HP is low — flee doesn't work in badlands (19% gaining).
         // Bot died 6/8 times in flee mode at low HP. Hide = digDown = survive.
-        if (state.health <= 8) {
+        if (state.health <= 12) {
             return { action: TACTICAL.HIDE, reason: `lethal+lowHP hide ${state.closestMobType}@${state.closestMobDist} hp=${state.health}` };
         }
         return { action: TACTICAL.FLEE, reason: `lethal ${state.closestMobType}@${state.closestMobDist} (hpLoss~${combat.expectedHpLoss})` };

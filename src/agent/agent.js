@@ -106,7 +106,9 @@ export class Agent {
                     // Flee from ranged is the only viable option.
                     if (state.closestMobIsRanged) fastAction = 'flee';
                     // Critical HP override: hide (dig shelter) instead of flee.
-                    if (state.health <= 6) fastAction = 'hide';
+                    // hp<=6 was too late — bot died at hp=0.5 while digging. Need hp<=10
+                    // to give enough time for digDown(3) to complete (1.6 seconds).
+                    if (state.health <= 10) fastAction = 'hide';
                     // Creeper override: always flee (any distance)
                     if (state.closestMobIsExplosive) fastAction = 'flee';
                 } else if (safeToEatNow) {
