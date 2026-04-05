@@ -24,7 +24,7 @@ const settings = {
     ],
 
     "load_memory": false, // load memory from previous session
-    "init_message": "!goal(\"You are at x=1200 in a new biome! Survive: 1) Kill animals for food (cow, pig, sheep). 2) Find trees, get wood with !baritone(mine oak_log). 3) Craft wooden pickaxe and sword. 4) Mine stone, craft stone tools. 5) Mine iron. 6) Fight zombies at night with your sword. Stay in this area, do NOT go back to spawn.\")", // sends to all on spawn
+    "init_message": "!goal(\"Step 1: !baritone(goto 1200 80 0). Step 2: !baritone(mine oak_log) to get wood. Step 3: !craftRecipe(oak_planks 1) then !craftRecipe(crafting_table 1) then !craftRecipe(stick 1) then !craftRecipe(wooden_sword 1) then !craftRecipe(wooden_pickaxe 1). Step 4: !baritone(mine stone) for cobblestone. Step 5: Kill animals with sword for food. IMPORTANT: Use !craftRecipe not !baritone(mine) for crafting.\")", // sends to all on spawn
     "only_chat_with": [], // 只听这些玩家的指令，其他人说话会被忽略。留空则响应所有人
     // ===== 空闲时默认任务 =====
     // 当机器人空闲超过 idle_timeout 秒后，自动开始执行对应的默认任务
