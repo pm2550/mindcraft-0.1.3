@@ -228,7 +228,7 @@ function generatePrimitives(escapeDir, terrain) {
 // ============================================================
 // PATH SCORING
 // ============================================================
-function scorePath(primitive, threatField, terrain, playerYaw, constraints = null) {
+function scorePath(primitive, threatField, terrain, playerYaw, constraints = null, obs = null) {
     let score = 0;
     const { escapeDir, threats, pressure } = threatField;
 
@@ -264,9 +264,24 @@ function scorePath(primitive, threatField, terrain, playerYaw, constraints = nul
         const idx = terrainIdx(wdx, wdz);
         if (idx >= 0 && idx < 2601) {
             const cell = terrain[idx];
-            if (cell === 1) score -= 2.0;
-            if (cell === 2) score -= 5.0;
-            if (cell === 3) score -= 3.0;
+            // Use heightmap for smarter scoring if available
+            const hm = obs?.heightmap;
+            if (hm && hm.length >= 2601 && idx < hm.length) {
+                const h = hm[idx]; // ground height relative to player feet
+                if (h >= 4) score -= 5.0;       // 4+ block wall — impassable
+                else if (h >= 2) score -= 3.0;   // 2-3 block wall — can't jump over
+                else if (h === 1) score -= 0.3;  // 1 block step — auto-jump handles it, slight cost
+                else if (h === 0) score += 0.3;  // same level — ideal path
+                else if (h >= -3) score += 0.5;  // 1-3 block drop — GOOD for fleeing (jump down, no damage)
+                else if (h >= -6) score -= 0.5;  // 4-6 block drop — take some fall damage but survivable
+                else score -= 3.0;               // 7+ block drop — lethal fall
+                if (cell === 2) score -= 4.0;    // liquid still bad
+            } else {
+                // Fallback: old 2D scoring
+                if (cell === 1) score -= 2.0;
+                if (cell === 2) score -= 5.0;
+                if (cell === 3) score -= 3.0;
+            }
         }
 
         const first = primitive.segments[0];
@@ -329,16 +344,24 @@ function scorePath(primitive, threatField, terrain, playerYaw, constraints = nul
  * Check if this primitive immediately runs into a solid wall (code=1) within 2 blocks.
  * Used to hard-veto wall-colliding candidates (like entersLiquidSoon does for liquid).
  */
-function hitsWallSoon(primitive, terrain, playerYaw) {
+function hitsWallSoon(primitive, terrain, playerYaw, heightmap) {
     if (!terrain || terrain.length < 2601 || !primitive?.segments?.length) return false;
     const seg = primitive.segments[0];
     const normMag = Math.sqrt(seg.dx * seg.dx + seg.dz * seg.dz) || 1;
     const ndx = seg.dx / normMag, ndz = seg.dz / normMag;
     const wd = relToWorld(ndx, ndz, playerYaw);
-    // Check only 1-2 blocks ahead (not a wide corridor — walls need tighter check)
     for (let dist = 1; dist <= 2; dist++) {
         const idx = terrainIdx(wd.dx * dist, wd.dz * dist);
-        if (idx >= 0 && idx < 2601 && terrain[idx] === 1) return true;
+        if (idx >= 0 && idx < 2601 && terrain[idx] === 1) {
+            // With heightmap: 1-block step is NOT a wall (auto-jump handles it)
+            if (heightmap && heightmap.length >= 2601 && idx < heightmap.length) {
+                const h = heightmap[idx];
+                if (h >= 2) return true;  // 2+ block wall = real wall
+                // h==1 or h==0: step or same level — not a wall
+            } else {
+                return true; // no heightmap: fall back to treating solid as wall
+            }
+        }
     }
     return false;
 }
@@ -448,40 +471,41 @@ class PathExecutor {
             sprint = true;
         }
 
-        // Jump when wall ahead (step-up 1-block ledges). Without jump, bot gets stuck
-        // at every terracotta step in badlands. MC auto-jump only works for players, not bots.
-        const terrain = obs?.terrain || [];
-        let wallAhead = false;
-        if ((forward || left || right) && terrain.length >= 2601) {
-            const yaw = obs?.yaw || 0;
-            const rad = yaw * Math.PI / 180;
-            const fwdWx = -Math.sin(rad), fwdWz = Math.cos(rad);
-            const idx1 = terrainIdx(fwdWx, fwdWz);
-            if (idx1 >= 0 && idx1 < 2601 && terrain[idx1] === 1) wallAhead = true;
-        }
-        let jump = !!obs?.onGround && wallAhead;
+        // MC auto-jump is ON in client settings. rl_action must explicitly send jump=false
+        // to suppress it during flee (auto-jump interrupts sprint on every 0.5-block step).
+        // Only send jump=true for: water swimming, stuck recovery (9+ ticks).
+        // With jump=false: MC still steps up 0.5-block slabs smoothly without jumping.
+        // Full 1-block steps need auto-jump, but those are rare vs 0.5-block terracotta.
+        let jump = false; // explicit false → overrides MC auto-jump via rl_action
 
         // Stuck detection: escalating unstuck strategy.
         // ONLY count grounded stuck — airborne speed<0.03 is normal (falling/jumping)
         // and should NOT trigger stuck recovery. 69% of "stuck" was actually airborne.
         if (speed < 0.03 && (forward || back) && !!obs?.onGround) {
             this._stuckTicks++;
-            if (this._stuckTicks >= 9) {
-                // Phase 3: stuck 9+ ticks. If airborne, look down and place block to bridge.
-                // If grounded, dig forward at feet level to break through.
+            if (this._stuckTicks >= 20) {
+                // Phase 4: stuck 20+ ticks = completely trapped (canyon/pit).
+                // Escape planner can't solve this — delegate to Baritone 3D pathfinding.
+                // Baritone can find paths up canyon walls that 2D terrain grid misses.
                 this.commitUntil = 0;
                 this._stuckTicks = 0;
+                this._baritoneFleeRequested = true; // signal to micro_controller
+                console.log(`[Escape] STUCK 20+ ticks — requesting Baritone flee`);
+                return { forward: false, back: false, left: false, right: false,
+                    sprint: false, jump: false, attack: false, dyaw: 0, dpitch: 0 };
+            } else if (this._stuckTicks >= 9) {
+                // Phase 3: stuck 9+ ticks. Dig wall + jump. DON'T reset counter
+                // so we escalate to phase 4 (Baritone) if this doesn't work.
+                this.commitUntil = 0;
                 if (!obs?.onGround && !obs?.inWater) {
-                    // Airborne stuck: look straight down, place block (use key)
                     const pitchToDown = Math.max(-15, Math.min(15, (90 - (obs?.pitch || 0)) * 0.5));
                     return { forward: false, back: false, left: false, right: false,
                         sprint: false, jump: false, attack: false, use: true,
                         sneak: true, dyaw: 0, dpitch: pitchToDown };
                 } else {
-                    // Grounded stuck: look at wall ahead and dig (attack key)
                     const pitchToWall = Math.max(-15, Math.min(15, (0 - (obs?.pitch || 0)) * 0.3));
                     return { forward: true, back: false, left: false, right: false,
-                        sprint: false, jump: false, attack: true,
+                        sprint: false, jump: true, attack: true,
                         dyaw: 0, dpitch: pitchToWall };
                 }
             } else if (this._stuckTicks >= 6) {
@@ -678,7 +702,10 @@ export class LocalEscapePlanner {
         // Force replan if mob distance is decreasing during commit window
         // Prevents running toward mob with stale worldAngle after mob repositions
         const nearestDist = tf.threats.reduce((m, t) => Math.min(m, t.dist || 99), 99);
-        if (committed && this._lastNearestDist !== undefined && nearestDist < this._lastNearestDist - 0.5) {
+        // Break commit only when mob is rapidly closing (2+ blocks closer).
+        // Old threshold 0.5 was too sensitive — broke commit during detour sideways movement
+        // where dist fluctuates ±0.3 naturally, causing constant replan and speed loss.
+        if (committed && this._lastNearestDist !== undefined && nearestDist < this._lastNearestDist - 2.0) {
             mustReplan = true;
             this.executor.commitUntil = 0; // break commit
         }
@@ -706,7 +733,8 @@ export class LocalEscapePlanner {
         // Soft wall veto: prefer routes that don't immediately hit solid blocks.
         // Keep wall-hitting candidates as fallback if nothing else available.
         if (terrain.length >= 2601) {
-            const noWall = candidates.filter(p => !hitsWallSoon(p, terrain, playerYaw));
+            const heightmap = obs?.heightmap;
+            const noWall = candidates.filter(p => !hitsWallSoon(p, terrain, playerYaw, heightmap));
             if (noWall.length > 0) candidates = noWall;
             // else: all routes have walls — keep all candidates, jump will handle 1-block steps
         }
@@ -727,7 +755,7 @@ export class LocalEscapePlanner {
         let bestScore = -Infinity;
 
         for (const prim of candidates) {
-            let s = scorePath(prim, tf, terrain, playerYaw, constraints);
+            let s = scorePath(prim, tf, terrain, playerYaw, constraints, obs);
             if (obs?.inWater && prim.name === 'sprint_escape') s += 0.8;
             if (s > bestScore) {
                 bestScore = s;
@@ -746,7 +774,10 @@ export class LocalEscapePlanner {
                 const idx = terrainIdx(-Math.sin(rad), Math.cos(rad));
                 return idx >= 0 && idx < 2601 && terrain[idx] === 1;
             });
-            const commitMs = wallNearby ? 500 : (tf.pressure > 2 ? 900 : 1400);
+            // Longer commit = less direction switching = higher sustained sprint speed.
+            // 46% gaining was caused by avg speed 0.073 (26% of sprint max) because
+            // direction changes every 500-1400ms reset sprint acceleration.
+            const commitMs = wallNearby ? 800 : (tf.pressure > 2 ? 1500 : 2500);
             this.executor.setPath(bestPrim, playerYaw, commitMs);
             this._currentScore = bestScore;
         }

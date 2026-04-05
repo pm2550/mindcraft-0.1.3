@@ -1,5 +1,8 @@
 """Offline training: load checkpoint, train, save. No server needed."""
 import sys, os, time
+# Force unbuffered stdout so train.log shows progress in real-time (not at exit).
+# Without this, nohup buffers all output and train.log stays 0 bytes for hours.
+sys.stdout = os.fdopen(sys.stdout.fileno(), 'w', buffering=1)  # line-buffered
 sys.path.insert(0, os.path.dirname(__file__))
 
 import torch

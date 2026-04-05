@@ -111,6 +111,9 @@ export class Agent {
                     if (state.health <= 10) fastAction = 'hide';
                     // Creeper override: always flee (any distance)
                     if (state.closestMobIsExplosive) fastAction = 'flee';
+                    // Enderman override: always flee. 40hp + teleport + 7dps = unfightable without gear.
+                    // Looking at enderman triggers aggro — fleeing (not looking) is the only safe option.
+                    if (state.closestMobType === 'enderman') fastAction = 'flee';
                 } else if (safeToEatNow) {
                     fastAction = 'eat';
                 }
@@ -126,12 +129,10 @@ export class Agent {
                 const enteringContinuousMode = continuousMode && activeMode !== fastAction;
                 if (this.scheduler) {
                     this.scheduler.setMode(fastAction, 'reflex');
-                    // Fight needs longer TTL than flee — bot must approach mob (4-8 blocks),
-                    // turn to face it, wait for cooldown, then strike. 3s was too short (timeout
-                    // before reaching mob). Flee keeps 3s (extended by postFleeUntil anyway).
-                    // Fight and hide need longer TTL. Hide = dig shelter (needs 5+ seconds to dig+seal).
-                    // 3s was too short → hide expired before shelter completed → bot died.
-                    const reflexTtl = (fastAction === 'fight' || fastAction === 'hide') ? 10000 : (continuousMode ? 3000 : 2500);
+                    // All continuous combat modes (flee/fight/hide) need 10s TTL.
+                    // 3s was too short for flee — creeper TTL expired before bot escaped blast range.
+                    // Flee is extended by postFleeUntil but 3+4=7s still not enough for skeleton kiting.
+                    const reflexTtl = continuousMode ? 10000 : 2500;
                     this.scheduler.declareOverride(
                         fastAction,
                         `reflex hp=${state.health} mob=${state.closestMobType}@${state.closestMobDist}`,
@@ -142,7 +143,7 @@ export class Agent {
                     // Reflex flee also sets postFleeUntil so override timeout
                     // won't drop to continue while threat is still close
                     if (fastAction === 'flee') {
-                        this.scheduler.postFleeUntil = Date.now() + 4000;
+                        this.scheduler.postFleeUntil = Date.now() + 10000;
                     }
                 }
                 if (continuousMode) {
@@ -185,7 +186,7 @@ export class Agent {
             this.scheduler.checkOverrideTimeout?.();
             const action = this.scheduler.resolve();
             if (action) {
-                try { this.bot._bridge.sendCommand('rl_action', action); } catch(e) {}
+                try { this.bot._bridge.sendCommand('rl_action', action).catch(() => {}); } catch(e) {}
             }
         }, 50);
 

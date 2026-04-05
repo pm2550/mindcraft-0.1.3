@@ -60,16 +60,21 @@ function bootstrapFightActions(obs) {
 
     if (dist > 4.0) {
         // Phase: APPROACH — sprint toward target, but only if roughly facing mob.
-        // Old code: unconditional forward → bot runs past mob when heading > 60°.
-        // 66% of fight frames were dist>=4 because bot never closed the gap.
+        // Bug: when aimDeg>60°, forward=true walks AWAY from mob (bot faces wrong direction).
+        // Data: zombie@9.2→23.8 with fwd=1 the entire time because aimDeg was >60° and
+        // bot walked forward in the wrong direction. Fix: stop forward when misaligned,
+        // only turn. Strafe toward mob to close gap while turning.
         if (Math.abs(aimDeg) < 60) {
-            fb = 2;      // forward — facing mob enough to close distance
-            sprint = 1;
+            fb = 2;      // forward — close enough heading to approach
+            sprint = Math.abs(aimDeg) < 30 ? 1 : 0;  // only sprint when well-aligned
+        } else if (Math.abs(aimDeg) < 120) {
+            fb = 1;      // stop forward — turn first, strafe sideways
+            sprint = 0;
+            lr = aimDeg > 0 ? 2 : 0;  // strafe toward mob direction
         } else {
-            fb = 2;      // still walk forward (slowly) — stopping causes standoff
-            sprint = 0;  // at dist=16.4 zombie won't chase; bot must close the gap
+            fb = 1;      // stop completely — turn hard, don't walk away
+            sprint = 0;
         }
-        lr = 1;      // no strafe during approach
         jump = 0;
         attack = 0;
     } else if (dist >= 2.5 && dist <= 4.0) {
@@ -96,6 +101,11 @@ function bootstrapFightActions(obs) {
         sprint = 0;
         attack = (cooldown >= 0.7 && aimAligned) ? 1 : 0;
         jump = 0;
+    }
+
+    // In water: must jump to swim, and adjust pitch to look forward (not down at water)
+    if (obs.inWater) {
+        jump = 1;
     }
 
     return [fb, lr, jump, sprint, attack, yawIdx, pitchIdx, 0, 0]; // +use, +sneak (not used in fight)
@@ -958,6 +968,21 @@ export class MicroController {
                     this._modeStartTime = Date.now();
                     this._lastMode = mode;
                     this._fightHeadingEma = null;
+                    // Fight entry: snap yaw toward nearest mob immediately.
+                    // Without this, aimDeg starts at 60-90° (leftover from flee direction)
+                    // and approach never forwards (data: 97% of fight frames had fwd=0).
+                    // One big dyaw on entry aligns bot → subsequent ticks can forward+sprint.
+                    if (mode === 'fight' && obs.threats?.length > 0) {
+                        const t = obs.threats.reduce((c, t) => (!c || t.dist < c.dist) ? t : c, null);
+                        if (t) {
+                            const snapYaw = Math.atan2(t.dx || 0, t.dz || 0) * (180 / Math.PI);
+                            const bridge = this.agent.bot?._bridge;
+                            if (bridge && Math.abs(snapYaw) > 15) {
+                                bridge.sendCommand('rl_action', { dyaw: snapYaw }).catch(() => {});
+                                console.log(`[MicroCtrl] Fight entry yaw snap: ${snapYaw.toFixed(0)}° toward ${t.type||'mob'}@${t.dist?.toFixed(1)}`);
+                            }
+                        }
+                    }
                     // Force pitch toward horizontal on mode change to flee/fight.
                     // digDown sets pitch=90° (look down) — if flee/fight starts with pitch=90,
                     // bot stares at ground and every attack misses. Reset immediately.
@@ -972,7 +997,11 @@ export class MicroController {
                 }
 
                 // === GLOBAL water: swim up via scheduler (not direct rl_action — that gets overridden) ===
-                if (obs.inWater) {
+                // Only intercept in hide mode (needs to surface to dig shelter).
+                // All other modes: let Baritone/escape planner handle water navigation.
+                // Old code intercepted everything except fight/flee → hunt_food/continue
+                // got stuck swimming in circles instead of reaching their goal.
+                if (obs.inWater && mode === 'hide') {
                     const currentPitch = obs.pitch || 0;
                     const swimPitch = Math.max(-15, Math.min(15, (-15 - currentPitch) * 0.4));
                     // Publish swim action through scheduler so agent.js sends it (not overridden)
@@ -986,7 +1015,8 @@ export class MicroController {
                     // Old bug: this canceled goto-1200 whenever bot crossed a river → bot returned to spawn.
                     if (!this._waterAutoSwimIssued) {
                         this._waterAutoSwimIssued = true;
-                        const isEscapeWater = mode === 'flee' || mode === 'fight' || mode === 'hide';
+                        // fight in water should NOT goto land — bot needs to approach drowned, not flee
+                        const isEscapeWater = mode === 'flee' || mode === 'hide';
                         if (isEscapeWater) {
                             const bridge = this.agent.bot?._bridge;
                             if (this.agent.bot?._baritoneActive || this._baritoneFleeActive) {
@@ -1042,8 +1072,26 @@ export class MicroController {
                         this._stuckCheckStart = null;
                         this._stuckEscapeUntil = 0;
                     }
-                    // If stuck-escape active, skip ALL micro control
+                    // If stuck-escape active, skip micro control BUT still collect Baritone demos.
+                    // Baritone's 3D pathfinding during flee is valuable expert data for RL —
+                    // it shows how to navigate out of canyons that escape planner can't handle.
                     if (this._stuckEscapeUntil && Date.now() < this._stuckEscapeUntil) {
+                        const b = obs.baritone;
+                        if (b && b.pathing) {
+                            const navSpeed = Math.sqrt((obs.vx||0)**2 + (obs.vz||0)**2);
+                            if (navSpeed > 0.03 || b.inFwd || b.inBack || b.inJump) {
+                                const navAction = {
+                                    forward: !!b.inFwd, back: !!b.inBack, left: !!b.inLeft, right: !!b.inRight,
+                                    jump: !!b.inJump, sprint: !!b.inSprint, attack: false, use: false,
+                                    sneak: !!b.inSneak, dyaw: 0, dpitch: 0,
+                                };
+                                const escConstraints = { ...scheduler.constraints, _mode: 'navigate' };
+                                this._collectCombatDemo(obs, navAction, escConstraints, 'navigate');
+                            }
+                        }
+                        // Also send obs to policy for learning
+                        const escObs = PolicyClient.formatObs(obs, { ...scheduler.constraints, _mode: 'flee' }, 'flee');
+                        this.policyClient?.sendObs?.(escObs);
                         this.lastObs = obs;
                         return;
                     }
@@ -1238,6 +1286,22 @@ export class MicroController {
                         // Fallback: escape planner only (no Q-net blend)
                         const plannerAction = this.escapePlanner.tick(obs, mode, constraints);
                         this._lastQHeadCount = 0;
+
+                        // Check if escape planner is stuck and wants Baritone flee
+                        if (this.escapePlanner._baritoneFleeRequested) {
+                            this.escapePlanner._baritoneFleeRequested = false;
+                            const bridge = this.agent.bot?._bridge;
+                            if (bridge) {
+                                const px = obs.px || 0, pz = obs.pz || 0;
+                                const t = obs.threats?.[0];
+                                // Flee direction: opposite of nearest mob
+                                const fleeX = t ? Math.round(px - (t.dx || 0) * 3) : Math.round(px + (Math.random()-0.5)*60);
+                                const fleeZ = t ? Math.round(pz - (t.dz || 0) * 3) : Math.round(pz + (Math.random()-0.5)*60);
+                                bridge.sendCommand('baritone', { command: `goto ${fleeX} 80 ${fleeZ}` }).catch(() => {});
+                                this._stuckEscapeUntil = Date.now() + 8000; // suspend micro 8s for Baritone
+                                console.log(`[MicroCtrl] Baritone flee (stuck escape) → goto ${fleeX} 80 ${fleeZ}`);
+                            }
+                        }
 
                         action = {
                             forward: !!plannerAction.forward,

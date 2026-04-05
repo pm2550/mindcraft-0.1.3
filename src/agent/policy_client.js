@@ -177,6 +177,8 @@ export class PolicyClient {
             px: obs.px,
             pz: obs.pz,
             terrain: obs.terrain || [],
+            heightmap: obs.heightmap || [],  // 51x51 ground height relative to player
+            ceilmap: obs.ceilmap || [],      // 51x51 ceiling height above ground
             threats: threats.slice(0, 4).map(t => t ? {
                 dx: t.dx || 0, dz: t.dz || 0, dy: t.dy || 0, dist: t.dist || 32,
                 hp: t.hp ?? -1, type: t.type || 'unknown',

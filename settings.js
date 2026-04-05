@@ -24,7 +24,16 @@ const settings = {
     ],
 
     "load_memory": false, // load memory from previous session
-    "init_message": "!goal(\"Step 1: !baritone(goto 1200 80 0). Step 2: !baritone(mine oak_log) to get wood. Step 3: !craftRecipe(oak_planks 1) then !craftRecipe(crafting_table 1) then !craftRecipe(stick 1) then !craftRecipe(wooden_sword 1) then !craftRecipe(wooden_pickaxe 1). Step 4: !baritone(mine stone) for cobblestone. Step 5: Kill animals with sword for food. IMPORTANT: Use !craftRecipe not !baritone(mine) for crafting.\")", // sends to all on spawn
+    "init_message": "!goal(\"" +
+        "IF night OR mobs_attacking OR hp<10 → !digDown(3) THEN wait\\n" +
+        "IF no_sword → GOTO_WOOD → CRAFT_TOOLS\\n" +
+        "IF no_food AND day → !attack(cow/pig/sheep) for meat\\n" +
+        "IF has_sword AND has_food → !baritone(mine stone) → craft stone_sword stone_pickaxe\\n" +
+        "\\n" +
+        "GOTO_WOOD: !baritone(goto 300 80 0) THEN !baritone(mine oak_log) [try birch_log if no oak]. Mine 4+ logs.\\n" +
+        "CRAFT_TOOLS: !craftRecipe(oak_planks 3) → !craftRecipe(crafting_table 1) → !placeHere(crafting_table) → !craftRecipe(stick 1) → !craftRecipe(wooden_sword 1) → !craftRecipe(wooden_pickaxe 1)\\n" +
+        "\\n" +
+        "RULES: 1) NEVER go underground without food+sword. 2) Night=shelter. 3) Craft sword BEFORE pickaxe.\")", // structured decision tree
     "only_chat_with": [], // 只听这些玩家的指令，其他人说话会被忽略。留空则响应所有人
     // ===== 空闲时默认任务 =====
     // 当机器人空闲超过 idle_timeout 秒后，自动开始执行对应的默认任务

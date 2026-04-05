@@ -52,7 +52,16 @@ def parse_obs_to_tensors(obs, device):
     """
     d = device
     terrain_raw = obs.get('terrain', [])
-    terrain = torch.tensor([_extract_terrain_window(terrain_raw)], dtype=torch.float32, device=d)
+    terrain_2d = _extract_terrain_window(terrain_raw)  # 441 values
+
+    # 3D terrain: heightmap + ceilmap (each 51x51 or 441 from 21x21)
+    hm_raw = obs.get('heightmap', [])
+    hm_21 = _extract_terrain_window(hm_raw) if len(hm_raw) > 0 else [0] * 441
+    cm_raw = obs.get('ceilmap', [])
+    cm_21 = _extract_terrain_window(cm_raw) if len(cm_raw) > 0 else [0] * 441
+
+    # Stack 3 channels: terrain(0-3) + heightmap(-12..12) + ceilmap(0..8) → (1, 3*441)
+    terrain = torch.tensor([terrain_2d + hm_21 + cm_21], dtype=torch.float32, device=d)
 
     self_state = torch.tensor([[
         (obs.get('hp', 20)) / 20,

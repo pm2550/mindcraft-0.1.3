@@ -570,9 +570,28 @@ class MicroPolicyTrainer:
 
     def load_checkpoint(self, path):
         ckpt = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(ckpt['model'])
-        if 'optimizer' in ckpt:
-            self.optimizer.load_state_dict(ckpt['optimizer'])
+        state = ckpt['model']
+        arch_changed = False
+        # Handle TerrainCNN channel expansion: old checkpoint has 1-channel conv,
+        # new model has 3-channel (terrain + heightmap + ceilmap).
+        conv_key = 'terrain_cnn.conv.0.weight'
+        if conv_key in state and state[conv_key].shape[1] == 1:
+            new_shape = self.model.state_dict()[conv_key].shape
+            if new_shape[1] == 3:
+                old_w = state[conv_key]
+                new_w = torch.zeros(new_shape, device=old_w.device, dtype=old_w.dtype)
+                new_w[:, 0:1, :, :] = old_w
+                state[conv_key] = new_w
+                arch_changed = True
+                print(f"[trainer] Expanded terrain CNN from 1ch→3ch (heightmap+ceilmap)")
+        self.model.load_state_dict(state, strict=False)
+        if 'optimizer' in ckpt and not arch_changed:
+            try:
+                self.optimizer.load_state_dict(ckpt['optimizer'])
+            except Exception:
+                print("[trainer] Optimizer state mismatch, reinitializing")
+        elif arch_changed:
+            print("[trainer] Architecture changed - fresh optimizer")
 
 
 def main():

@@ -17,12 +17,16 @@ import numpy as np
 
 
 class TerrainCNN(nn.Module):
-    """Process 21x21 terrain grid with spatial convolutions."""
+    """Process 21x21 terrain grid with spatial convolutions.
+    Input: 3 channels — terrain(2D passability) + heightmap(ground height) + ceilmap(ceiling).
+    Falls back to 1-channel if heightmap/ceilmap not available (backward compat).
+    """
 
-    def __init__(self, out_dim=256):
+    def __init__(self, out_dim=256, in_channels=3):
         super().__init__()
+        self.in_channels = in_channels
         self.conv = nn.Sequential(
-            nn.Conv2d(1, 32, 3, padding=1),   # 21x21 → 21x21x32
+            nn.Conv2d(in_channels, 32, 3, padding=1),   # 21x21 → 21x21x32
             nn.ReLU(),
             nn.Conv2d(32, 64, 3, padding=1),  # → 21x21x64
             nn.ReLU(),
@@ -41,7 +45,25 @@ class TerrainCNN(nn.Module):
             features: (batch, out_dim)
             spatial: (batch, 64, 4, 4) for cross-attention
         """
-        x = terrain.view(-1, 1, 21, 21) / 3.0  # normalize to [0,1]
+        # terrain shape: (batch, C*441) or (batch, C, 21, 21) where C=1 or 3
+        B = terrain.size(0)
+        if terrain.dim() == 2:
+            total = terrain.size(1)
+            if total == 441:
+                # Legacy 1-channel: pad to 3 channels with zeros
+                x = terrain.view(B, 1, 21, 21) / 3.0
+                if self.in_channels == 3:
+                    x = torch.cat([x, torch.zeros(B, 2, 21, 21, device=x.device)], dim=1)
+            elif total == 3 * 441:
+                x = terrain.view(B, 3, 21, 21)
+                # Normalize each channel: terrain/3, heightmap/12, ceilmap/8
+                x[:, 0] /= 3.0
+                x[:, 1] /= 12.0
+                x[:, 2] /= 8.0
+            else:
+                x = torch.zeros(B, self.in_channels, 21, 21, device=terrain.device)
+        else:
+            x = terrain  # already (B, C, 21, 21)
         spatial = self.conv(x)                    # (B, 64, 4, 4)
         flat = spatial.view(spatial.size(0), -1)  # (B, 1024)
         features = self.fc(flat)                  # (B, out_dim)
